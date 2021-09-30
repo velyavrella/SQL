@@ -1,0 +1,214 @@
+---
+title: "Time Series Project"
+author: "Velya"
+date: "9/13/2021"
+output: html_document
+---
+## Pengolahan Data Time Series
+Pada kesempatan kali dilakukan pengolahan data menggunakan model time series khususnya model ARIMA (Autoregressive Integrated Moving Average). ARIMA cocok jika observasi dari deret waktu (time series) secara statistik berhubungan satu sama lain (dependent).
+
+```{r}
+# Library yang digunakan pada pengolahan data
+## Untuk membaca data dengan format Excel
+library(readxl)
+## Untuk mendapatkan informasi dari data
+library(psych)
+## Untuk mengubah data menjadi Time Series, Acf, Pacf, Model Arima dan ADF Test
+library(tseries)
+# Untuk melihat signifikansi dari Koefesien
+library(lmtest) 
+## Untuk memprediksi data nantinya
+library(forecast)
+```
+## Informasi Data
+Data penderita DBD di Kota Jakarta Pusat secara bulanan dari Januari 2008 - November 2017 yang diperoleh dari Dinas Kesehatan. Jumlah data adalah 515 data. Data yang digunakan sebagai percobaan dalam pemodelan sebanyak 490, sedangkan sisanya digunakan untuk perbandingan data asli dengan hasil prediksi.
+
+```{r}
+# Input Data
+data_asli <- read_excel("D:/SEMESTER 7/Kapseltat/Tugas Kelompok Time Series/Data Mingguan Penderita DBD JakPus.xlsx")
+# Mengubah data training yaitu data yang dimodelkan kedalam bentuk time series
+data_asli <- ts(data_asli)
+data <- ts(data_asli[1:490,])
+# Plot Data
+plot(data, main = "Plot Data Penderita DBD JakBar 2008-2017", ylab = "Penderita DBD", xlab = "Waktu" , type = 'o')
+```
+
+Berdasarkan plot deret waktu tersebut data penderita DBD di Kota Jakarta Pusat secara bulanan dari Januari 2008 - November 2017 sangatlah beragam. Terlihat bahwa sekilas data tidak stasioner, yaitu terdapat variansi yang cukup besar.
+```{r}
+#Statistika Deskriptif Data
+describe(data)
+```
+Rata-rata penderita DBD di Kota Jakarta Pusat secara bulanan dari Januari 2008 - November 2017 sebesar 43 orang dengan banyak penderita terkecil hanya seorang dan terbesar sebanyak 219 orang pada Maret 2016. Penderita DBD di Kota Jakarta Pusat dalam rentang waktu tersebut juga sangat beragam ditandai dengan besarnya standar deviasi. Kemencengan (skewness) positif yang artinya data menumpuk di nilai yang lebih kecil dari rataan. Kemudian keruncingan (kurtosis) < 3 yaitu distribusi lebih landai dari distribusi normal.
+
+Untuk mengecek kestasioneran data lebih lanjut, data akan diuji dengan 3 cara.
+
+```{r}
+# CEK STASIONERITAS
+##Plot Data
+plot(data, main = "Plot Data Penderita DBD JakBar 2008-2017")
+abline(h = mean(ts(data)))
+## Plot ACF
+acf(data) 
+## Uji ADF (Augmented Dickey-Fuller)
+adf.test(data)
+#jika p-value < alpha maka stasioner
+#jadi asumsi stasioner dulu
+```
+Perhatikan dari plot data terlihat bahwa sekilas data tidak stasioner, yaitu terdapat variansi yang cukup besar. Data tidak stasioner juga dibuktikan pada plot ACF (Autocorrelation Function) data yang membentuk pola dan menurun secara perlahan. Namun, pada berdasarkan uji ADF (Augmented Dickey-Fuller), dengan 𝛂 = 0.05 diperoleh p-value = 0,01 < 𝛂 sehingga disimpulkan bahwa data stasioner.
+
+Maka selanjutnya dimodelkan data asli (Model 1) dan data yang sudah didiferensi (Model 2).
+
+## Menentukan Modet Deret Waktu (Model 1)
+Selanjutnya dilakukan estimasi model dengan melihat plot ACF (Autocorrelation Function) dan PACF (Partial Autocorrelation Function).
+
+```{r}
+#ACF Manual
+T= length(data)
+maxLag=12
+df <- data.frame(1:T,data)
+acfResults <- data.frame(k = c(rep(1:maxLag)), acf=NA, stringsAsFactors = F)
+for (k in 1: maxLag) {
+  N <- nrow(df)-k
+  acf <- sum((data[1:N]-mean(ts(data)))%*%(data[(1+k):(N+k)]-mean(data)))/sum((data-mean(data))^2)
+  acfResults[k,1] <- k
+  acfResults[k,2] <- acf
+}
+```
+```{r}
+#ACF dengan R
+acf(data, plot = FALSE)
+```
+```{r}
+#Plot ACF Manual dan dengan R
+par(mfrow=c(1,2))
+plot(acfResults[,2], type = "h", ylim = c(-.2,1), xlab = "lag", ylab = "ACF", main = 'Plot ACF manual')
+abline(h = 0)
+abline(h = c(1,-1)*1.96/sqrt(length(data)), lty = 2, col = "blue")
+
+acf(data,main="Plot ACF dengan R")
+```
+```{r}
+#PACF Manual
+PacfResults <- data.frame(k = c(1:maxLag), pacf = NA, stringsAsFactors = FALSE)
+rho = acfResults[,2]
+phi = matrix(0, nrow = maxLag, ncol = maxLag)
+phi[1,1] = rho[1]
+for (i in 2:maxLag){
+  phi[i,i] = (rho[i]-(sum(phi[i-1,1:i-1]*rho[(i-1):1])))/(1-sum(phi[i-1,1:i-1]*rho[1:i-1]))
+  for (j in 1:maxLag){
+    if (j<i){
+      phi[i,j] = phi[i-1,j]-(phi[i,i]*phi[i-1,i-j])
+    }
+    else {0}
+  }
+  PacfResults[k,1] <- k
+  PacfResults[,2] <- diag(phi)
+}
+```
+```{r}
+#PACF dengan R
+pacf(data, plot = FALSE)
+```
+```{r}
+#Plot PACF Manual dan dengan R
+par(mfrow=c(1,2))
+plot(PacfResults[,2], type = "h", ylim = c(-.2,1), xlab = "lag", ylab = "PACF", main = 'Plot PACF manual')
+abline(h=0)
+abline(h=c(1,-1)*1.96/sqrt(length(data)),lty=2,col="blue")
+
+pacf(data,main='Plot PACF dengan R')
+```
+
+Berdasarkan gambar plot ACF dan PACF di atas, terlihat bahwa plot ACF menurun secara eksponensial, sedangkan pada plot PACF terdapat cut-off setelah lag-2, maka didapatkan model ARIMA(2,0,0) yang artinya model hanya mengandung Autoregressive (AR).
+
+Selanjutnya, akan dicari estimasi parameter untuk model pertama ini, yaitu ARIMA(2,0,0).
+
+```{r}
+#Estimasi Parameter
+model_1 <- arima(ts(data),order=c(2,0,0))
+summary(model_1)
+```
+Berdasarkan hasil identifikasi model, diperoleh nilai AIC sebesar 4120.18.
+
+## Menentukan Modet Deret Waktu (Model 2)
+Data asli didiferensi sekali dan kemudia di cek stasioneritasnya kembali.
+
+```{r}
+# Cara differensi data jika data tidak stasioner
+data2 <- diff(ts(data))
+plot(data2, main = "Plot Data Differensi 1x")
+abline(h = mean(data2))
+```
+```{r}
+# CEK STASIONERITAS
+##Plot Data
+plot(data2, main = "Plot Data Penderita DBD JakBar 2008-2017")
+abline(h=mean(ts(data2)))
+## Plot ACF
+acf(data2) 
+## Uji ADF (Augmented Dickey-Fuller)
+adf.test(data2)
+```
+Dari plot data yang telah didiferensi sekali terlihat data cukup stasioner dibanding data asli sebelumnya.
+Kemudian, pada plot ACF (Autocorrelation Function) tidak membentuk pola yang signifikan. Begitu pula, pada hasil uji ADF (Augmented Dickey-Fuller), dengan 𝛂 = 0.05 diperoleh p-value = 0,01 < 𝛂 sehingga disimpulkan bahwa data yang telah didiferensi sekali telah stasioner.
+
+Selanjutnya dilakukan estimasi model dengan melihat plot ACF (Autocorrelation Function) dan PACF (Partial Autocorrelation Function).
+
+```{r}
+acf(data2,main="Plot ACF dengan R")
+pacf(data2,main='Plot PACF dengan R')
+```
+
+Dari hasil plot ACF dan PACF di atas, model yang mungkin cocok adalah ARIMA(1,1,1).
+Selanjutnya, dapat digunakan auto arima di R sebagai pertimbangan dalam menentukan model. Hasilnya adalah ARIMA(5,1,2).
+
+```{r}
+model_auto = auto.arima(data)
+summary(model_auto)
+```
+Berdasarkan ketiga model ARIMA di atas yaitu ARIMA(2,0,0), ARIMA(1,1,1), dan ARIMA(5,1,2) kemudian ditentukan model mana yang cukup baik. Dapat dilihat melalui nilai AIC,MAPE beserta RMSE dari masing-masing model.
+Diperoleh AIC dan RMSE paling kecil terletak pada ARIMA(5,1,2), sedangkan MAPE paling kecil ada pada ARIMA(1,1,1).
+Maka, dipilih model ARIMA(5,1,2) sebagai model yang cocok untuk data yang dipunya.
+
+## Signifikansi dari Parameter Model
+```{r}
+coeftest(model_auto) 
+```
+Dapat dilihat bahwa pvalue dari koefisien ar4 > α maka dapat kita simpulkan bahwa hanya koefisien ar4 yang tidak siginifikan pada model yang dimiliki. Sehingga model memiliki semua parameter kecuali ar4.
+Kemudian, langkah selanjutnya dilakukan uji diagnostik residual data.
+
+```{r}
+#Uji Diagnostik
+qqnorm(residuals(model_auto))
+qqline(residuals(model_auto))
+hist(residuals(model_auto))
+shapiro.test(residuals(model_auto))
+Box.test(residuals(model_auto),type="Ljung")
+checkresiduals(residuals(model_auto))
+```
+
+Berdasarkan QQ Plot, terlihat pada awal dan akhir data nilainya cukup jauh dari garis. Sedangkan pada histogram sekilas data residual berdistribusi normal dan terdapat nilai ekstrim tinggi data. 
+Untuk menguji kenormalan digunakan Uji Shapiro-Wilk diperoleh p-value < 0.5. Artinya untuk uji kenormalan Shapiro-Wilk 𝐻0 ditolak, sehingga tidak berdistribusi normal. 
+Selanjutnya, pada grafik residual ACF masih terdapat lag sehingga dapat diasumsikan adanya korelasi antar residual. Untuk pembuktian lebih lanjut, gunakan Uji Ljung-Box diperoleh p-value < 0.05, sehingga 𝐻0 ditolak. Artinya, ada korelasi antar residual. Adanya korelasi dan data tidak berdistribusi normal mengakibatkan tidak terpenuhinya asumsi residual dalam pemodelan.
+
+## Pemeriksaan Data pada data Test
+
+```{r}
+#grafik observasi
+plot(data_asli,col="black", ylab="Penderita DBD JakPus", xlab="waktu",type='l') 
+#grafik model
+lines(fitted.values(model_auto), type="l",lty=2,col="red") 
+```
+
+## Prediksi
+Selanjutnya diperiksa prediksi berdasarkan model terpilih.
+```{r}
+#Prediksi
+prediksi = forecast(model_auto, h = 5)
+autoplot(prediksi)
+summary(prediksi)
+```
+## KESIMPULAN
+Model dari pengolahan data penderita DBD di Kota Jakarta Pusat secara bulanan dari Januari 2008 - November 2017 diperoleh bahwa model yang terpilih adalah ARIMA(5,1,2) dan memiliki RMSE sebesar ≈15% sehingga model ini dapat digunakan untuk memprediksi data ke depannya.
+
+Namun, perhatikan pada uji diagnostik model ARIMA(5,1,2) sebelumnya menunjukkan adanya korelasi antar residual dan residual model tidak berdistribusi normal sehingga asumsi residual dalam pemodelan tidak dipenuhi. Maka, akan lebih baik data dimodelkan dengan data yang memperhatikan korelasi antar residual datanya.
