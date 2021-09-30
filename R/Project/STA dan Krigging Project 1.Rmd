@@ -1,0 +1,328 @@
+---
+title: "STA dan Krigging Project (Part 1)"
+author: "Velya"
+date: "9/15/2021"
+output: html_document
+---
+
+## Metode Space Time Analysis
+yaitu pemodelan deret waktu secara bersama dari lokasi-lokasi berdekatan dimana antar lokasi saling berpengaruh dan masing lokasi-lokasi punya deret waktu. 
+
+```{r}
+# Package yang digunakan
+library(readxl)
+library(starma)
+library(tseries)
+library(psych)
+library(gstar)
+library(ggplot2)
+```
+## Informasi Data
+Untuk penelitian ini, digunakan data penderita DBD di Provinsi DKI Jakarta dan jumlah penduduk untuk setiap kecamatan di Provinsi DKI Jakarta. Data penderita DBD secara mingguan sepanjang tahun 2013 yang kami peroleh dari Dinas Kesehatan. Sedangkan data jumlah penduduk untuk setiap kecamatan di Provinsi DKI Jakarta dari link berikut:
+https://data.jakarta.go.id/dataset/jumlahpendudukberdasarkanusiaperkelurahandkijakarta/resource/7a6be211-4e8b-487c-a67a-bc796e793eb0
+
+```{r}
+# Input data_train
+data <- read_excel("D:/SEMESTER 7/Kapseltat/Tubes Space Time/dataa.xlsx")
+data <- data[1:52,]
+koor <- read_excel("D:/SEMESTER 7/Kapseltat/Tubes Space Time/koord.xlsx")
+```
+```{r}
+# Plot Data Koordinat untuk setiap kecamatan di Provinsi DKI Jakarta
+ggplot(koor, aes(x = X, y = Y, color = 'red')) + geom_point()
+```
+
+```{r}
+# Banyaknya Observasi per lokasi
+T = 52
+
+# Banyaknya lokasi
+N = 41
+
+# Membentuk data menjadi data time series dalam bentuk matrix
+data_train <- data.matrix((ts(data))) 
+```
+
+## Stastistika Deskriptif
+```{r}
+# Statistik Deskriptif
+describe(data_train)
+```
+
+Rata-rata penderita DBD setiap kecamatan di Provinsi DKI Jakarta sepanjang tahun 2013 dengan minimum 2,69 orang yang berada di Kecamatan Menteng dan maksimum 20,36 orang yang berada di Kecamatan Cakung. Banyak penderita terkecil hanya seorang dan terbesar sebanyak 35 orang di Kecamatan Cakung di tahun 2016. Penderita DBD setiap kecamatan   di Provinsi DKI Jakarta tahun 2013 juga sangat beragam ditandai dengan besarnya standar deviasi. 
+Kemencengan (skewness) positif yang artinya data menumpuk di nilai yang lebih kecil dari rataan. Kemudian keruncingan (kurtosis) < 3 yaitu distribusi lebih landai dari distribusi normal. Kurtosis negatif menandakan distribusi yang relatif datar.
+
+```{r}
+# Plot Data
+plot(data_train[,1], type = "l", lty = 1, col = 1, ylim = c(0,50), 
+     ylab = "Jumlah Penderita DBD", xlab = "Minggu")
+for (i in 2:N) {
+  lines(data_train[,i], type = "l", col = i, lty = i)
+}
+
+```
+Berdasarkan plot deret waktu tersebut data penderita DBD setiap kecamatan di Provinsi DKI Jakarta sepanjang tahun 2013 secara mingguan sangatlah beragam. Terlihat bahwa sekilas data tidak stasioner, yaitu terdapat variansi yang cukup besar pada beberapa kecamatan.
+
+## Cek Stasioneritas
+digunakan uji ADF (Augmented Dickey-Fuller) untuk mengecek apakah data yang digunakan stasioner atau tidak.
+```{r}
+# Uji Kestasioneran
+for (i in 1:N){
+  print(adf.test(data_train[,i]))
+}
+```
+Berdasarkan uji ADF (Augmented Dickey-Fuller), setiap kecamatan di Provinsi DKI Jakarta sepanjang tahun 2013 diperoleh p-value > 𝛂, dengan 𝛂 = 0.05. Sehingga disimpulkan bahwa data tidak stasioner. 
+Maka, selanjutnya data didiferensi dan di cek kembali kestasioneritasnya.
+```{r}
+# Differencing data
+diff_data_train = matrix(0, T, N)
+for (i in 2:T){
+  diff_data_train[i,] = data_train[i,] - data_train[(i-1),]
+}
+# Menghilangkan baris 0 di t=1
+diff_data_train_used = matrix(0, (T-1), N)
+for (i in 1:(T-1)){
+  diff_data_train_used[i,] = diff_data_train[i+1,]
+}
+# Uji Kestasioneran
+for (i in 1:N){
+  print(adf.test(diff_data_train_used[,i]))
+}
+```
+Berdasarkan hasil uji ADF (Augmented Dickey-Fuller), dengan 𝛂 = 0.05 diperoleh p-value = 0,01 < 𝛂 sehingga disimpulkan bahwa data yang telah didiferensi sekali telah stasioner.
+
+## Matriks Bobot Seragam
+
+```{r}
+#Matriks Bobot Seragam
+w0 = diag(N)
+w1 = diag(0, N)
+for (i in 1:41) {
+  for (j in 1:41) {
+    if (i != j) {
+      w1[i,j] = 1/40
+    }
+  }
+}
+W = list(w0,w1)
+```
+## Identifikasi Model
+Selanjutnya dilakukan estimasi model dengan melihat plot ACF (Autocorrelation Function) dan PACF (Partial Autocorrelation Function).
+
+```{r}
+#Membentuk matriks Y
+Y <- matrix(0, nrow = (T-1), ncol = N)
+for (i in 1:N){
+  Y[,i] <- diff_data_train_used[,i]
+}
+#Identifikasi Orde
+stacf(Y, W)
+stpacf(Y, W)
+```
+
+Model yang mungkin adalah GSTAR(1;1) dan GSTAR(2;1,1)
+
+## GSTAR(1;1)
+Estimasi parameter setiap kecamatan di Provinsi DKI Jakarta
+
+```{r}
+fitmodel1 <- gstar(data,w1,p=1,d=1,est="OLS")
+summary(fitmodel1)
+```
+
+Terdapat dua paramater dalman model GSTAR(1;1) yaitu psi10 dan psi11 untuk setiap setiap kecamatan di Provinsi DKI Jakarta. Diperoleh pula nilai AIC untuk model GSTAR(1;1) adalah sebesar 9540.
+
+```{r}
+phi = fitmodel1$B
+phi10_1 = phi[1:41,]
+phi11_1 = phi[42:82,]
+
+phi_10_1 = diag(phi10_1,41)
+phi_11_1 = diag(phi11_1,41)
+
+D = phi_10_1 + (phi_11_1%*%w1)
+```
+```{r}
+##Generate Data GSTAR(1;1)
+model_Y1=t(Y)
+model1_1=matrix(0,nrow=N,ncol=T)
+for(i in 2:T){
+  model1_1[,i]=D%*%(model_Y1[,(i-1)])
+}
+```
+```{r}
+T = 52
+#Returns data_train to initial data_train (diff)
+modeldata_train1 = matrix(0,nrow=N,ncol=T)
+data_train1_1 = t(data_train)
+I = diag(41)
+for (i in (3:N)) {
+  for (j in (3:T)){
+    modeldata_train1[,j] = (D+I)%*%data_train1_1[,j-1]-D%*%data_train1_1[,j-2]
+  }
+}
+
+modeldata_train1 = t(modeldata_train1)
+
+## menghilangkan baris 0 di t=1
+modeldata1 = matrix(0,(T-2),N)
+for (i in 1:(T-2)){
+  modeldata1[i,]=modeldata_train1[i+2,]
+}
+
+data_train1 = data_train[1:50,]
+```
+
+## Uji Diagnostik
+Model dikatakan cocok jika rataan nol dan variansi residual konstan, residual berdistribusi normal, dan residual saling bebas.
+
+```{r}
+Residual1 = matrix(0,nrow=T-2,ncol=N)
+par(mfrow=c(2,2))
+for (i in 1:N){
+  Residual1[,i]=modeldata1[,i]-data_train1[,i]
+  plot(Residual1[,i],type='l',main = paste("Residual Kecamatan", i))
+  abline(h=0)
+  acf(Residual1[,i],main = paste("ACF Residual Kecamatan", i))
+  qqnorm(Residual1[,i],main = paste("Normalitas Residual Kecamatan", i))
+  qqline(Residual1[,i])
+  hist(Residual1[,i],main = paste("Histogram Residual Kecamatan", i)) 
+}
+
+# Uji Kenormalan Residual
+for (i in 1:N) {
+  print(shapiro.test(Residual1[,i]))
+}
+
+#Uji Independensi Residual 
+for (i in 1:N) {
+  print(Box.test(Residual1[,i],lag = 20, type = "Ljung-Box"))
+}
+
+#Menghitung MSE
+MSE1 = matrix(0,1,N)
+for(i in 1:N){
+  MSE1[,i] = mean(Residual1[,i]*Residual1[,i])
+}
+MSE1
+```
+Berdasarkan plot residual data setiap kecamatan di Provinsi DKI Jakarta, secara umum terlihat residual tersebar di sekitar nol tanpa tren.
+Berdasarkan QQ Plot, terlihat pada awal dan akhir data nilainya cukup jauh dari garis. Sedangkan pada histogram sekilas teradapat beberapa data residual yang tidak berdistribusi normal dan berdistribusi normal. 
+Untuk menguji kenormalan digunakan Uji Shapiro-Wilk diperoleh terdapat 14 kecamatan yang memiliki p-value < 0.5. Artinya untuk uji kenormalan Shapiro-Wilk 𝐻0 ditolak, sehingga tidak berdistribusi normal. 
+Selanjutnya, pada grafik residual terdapat beberapa ACF yang tidak terdapat lag yang melebihi batas signifikansi sehingga dapat diasumsikan tidak ada korelasi antar residual. Untuk pembuktian lebih lanjut, gunakan Uji Ljung-Box diperoleh terdapat 9 kecamatan yang memiliki p-value < 0.05, sehingga 𝐻0 ditolak. Artinya, terdapat korelasi antar residual. Karena data tidak memenuhi 3 asumsi tersebut mengakibatkan beberapa kecamatan tidak terpenuhinya asumsi residual dalam pemodelan.
+
+## Forecasting
+Selanjutnya diperiksa prediksi berdasarkan model terpilih.
+```{r}
+prediksi1 <- as.matrix(predict(fitmodel1))
+prediksi1
+plot(fitmodel1, n_predict = 30)
+```
+
+## GSTAR(2;1,1)
+Estimasi parameter setiap kecamatan di Provinsi DKI Jakarta
+
+```{r}
+fitmodel2 <- gstar(data, w1, p = 2, d = 1, est = "OLS")
+summary(fitmodel2)
+```
+
+Terdapat empat paramater dalman model GSTAR(2;1,1) yaitu psi10. psi20, psi11, dan psi21 untuk setiap setiap kecamatan di Provinsi DKI Jakarta. Diperoleh pula nilai AIC untuk model GSTAR(2;1,1) adalah sebesar 9396.
+```{r}
+phi2 = fitmodel2$B
+phi10_2 = phi2[1:41,]
+phi20_2 = phi2[42:82,]
+phi11_2 = phi2[83:123,]
+phi21_2 = phi2[124:164,]
+
+phi_10_2 = diag(phi10_2,41)
+phi_20_2 = diag(phi20_2,41)
+phi_11_2 = diag(phi11_2,41)
+phi_21_2 = diag(phi21_2,41)
+```
+```{r}
+T = 52
+##Generate data_train GSTAR(2;1,1)
+model_Y2=t(Y)
+D1=phi_10_2+(phi_11_2%*%w1)
+D2=phi_20_2+(phi_21_2%*%w1)
+model1_2=matrix(0,nrow=N,ncol=T)
+for(i in 3:T){
+  model1_2[,i]=D1%*%(model_Y2[,(i-2)])+D2%*%(model_Y2[,(i-1)])
+}
+
+#Returns data_train to initial data_train (diff)
+modeldata_train2 = matrix(0,nrow=N,ncol=T)
+data_train1_2 = t(data_train)
+I = diag(41)
+for (i in (3:N)) {
+  for (j in (3:T)){
+    modeldata_train2[,j] = (D1+I)%*%data_train1_2[,j-1] -(D1)%*%data_train1_2[,j-2]+(D2+I)%*%data_train1_2[,j] -(D2)%*%data_train1_2[,j-1]
+  }
+}
+
+modeldata_train2 = t(modeldata_train2)
+
+
+# Menghilangkan baris 0 di t=1
+modeldata2 = matrix(0,(T-2),N)
+for (i in 1:(T-2)){
+  modeldata2[i,] = modeldata_train2[i+2,]
+}
+
+data_train2 = data_train[1:50,]
+```
+
+## Uji Diagnostik
+Model dikatakan cocok jika rataan nol dan variansi residual konstan, residual berdistribusi normal, dan residual saling bebas.
+```{r}
+#Residuals
+Residual2 = matrix(0,nrow = T-2,ncol = N)
+par(mfrow = c(2,2))
+for (i in 1:N){
+  Residual2[,i] = modeldata2[,i]-data_train2[,i]
+  plot(Residual2[,i], type = 'l', main = paste("Residual Kecamatan", i))
+  abline(h = 0)
+  acf(Residual2[,i],main = paste("ACF Residual Kecamatan", i))
+  qqnorm(Residual2[,i],main = paste("Normalitas Residual Kecamatan", i))
+  qqline(Residual2[,i])
+  hist(Residual2[,i],main = paste("Histogram Residual Kecamatan", i)) 
+}
+
+# Uji Kenormalan Residual
+for (i in 1:N) {
+  print(shapiro.test(Residual2[,i]))
+  
+}
+
+#Uji Independensi Residual 
+for (i in 1:N) {
+  print(Box.test(Residual2[,i],lag = 20, type = "Ljung-Box"))
+}
+
+#Menghitung MSE
+MSE2 = matrix(0,1,N)
+for(i in 1:N){
+  MSE2[,i] = mean(Residual2[,i]*Residual2[,i])
+}
+MSE2
+```
+
+Berdasarkan plot residual data setiap kecamatan di Provinsi DKI Jakarta, secara umum terlihat residual tidak tersebar di sekitar nol.
+Berdasarkan QQ Plot, terlihat pada awal dan akhir data nilainya cukup jauh dari garis. Sedangkan pada histogram sekilas teradapat beberapa data residual yang tidak berdistribusi normal dan berdistribusi normal. 
+Untuk menguji kenormalan digunakan Uji Shapiro-Wilk diperoleh terdapat 10 kecamatan yang memiliki p-value < 0.5. Artinya untuk uji kenormalan Shapiro-Wilk 𝐻0 ditolak, sehingga tidak berdistribusi normal. 
+Selanjutnya, pada grafik residual terdapat beberapa ACF yang tidak terdapat lag yang melebihi batas signifikansi sehingga dapat diasumsikan tidak ada korelasi antar residual. Untuk pembuktian lebih lanjut, gunakan Uji Ljung-Box diperoleh seluruh kecamatan yang memiliki p-value < 0.05, sehingga 𝐻0 ditolak. Artinya, terdapat korelasi antar residual. Karena data tidak memenuhi 3 asumsi tersebut mengakibatkan beberapa kecamatan tidak terpenuhinya asumsi residual dalam pemodelan.
+
+## Forecasting
+Selanjutnya diperiksa prediksi berdasarkan model terpilih.
+```{r}
+prediksi <- as.matrix(predict(fitmodel2))
+prediksi
+plot(fitmodel2, n_predict = 30)
+(n_predict = predict(fitmodel2, n = 10))
+```
+
+## Kesimpulan
+
+Dipilih model GSTAR (1; 1) sebagai model GSTAR untuk data penderita DBD di Provinsi DKI Jakarta tahun 2013 untuk setiap kecamatan di Provinsi DKI Jakarta, karena memiliki nilai MSE terkecil.
+Hasil prediksi yang diperoleh untuk penderita Demam Berdarah di setiap kecamatan di Provinsi DKI Jakarta dalam beberapa minggu ke depan menggunakan model GSTAR (1;1) yang kemudian akan dianalisis lebih lanjut menggunakan Analisis Spasial.
