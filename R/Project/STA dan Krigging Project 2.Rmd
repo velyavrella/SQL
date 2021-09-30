@@ -1,0 +1,98 @@
+---
+title: "STA dan Krigging Project (Part 2)"
+author: "Velya"
+date: "9/16/2021"
+output: html_document
+---
+
+## Analisis Spasial
+Analisis spasial adalah sekumpulan teknik yang dapat digunakan dalam pengolahan data Sistem Informasi Geografis (SIG). 
+Pada kesempatan kali ini, dilakukan pengolahan data menggunakan metode krigging. Kriging merupakan suatu metode analisis data geostatistika yang digunakan untuk menduga besarnya nilai yang mewakili suatu titik yang tidak tersampel berdasarkan titik tersampel yang berada di sekitarnya dengan menggunakan model struktural semivariogram.
+
+```{r}
+#Mengaktifkan library yang digunakan
+library(sp)
+library(gstat)
+library(dplyr)
+library(ggplot2)
+library(maptools)
+library(readxl)
+library(tidyverse)
+```
+
+## Informasi Data
+Digunakan hasil forecast data penderita DBD di Provinsi DKI Jakarta untuk setiap kecamatan di Provinsi DKI Jakarta menggunakan hasil analisis space time sebelumnya (Part 1) dengan model GSTAR(1;1) 
+
+```{r}
+#Input Data
+data <- read_excel("D:/SEMESTER 7/Kapseltat/Tubes Space Time/forecast.xlsx")
+data <- data.frame(data)
+```
+
+Kemudian “data frame” diubah menjadi “spatial point data frame" dengan x dany adalah nama kolom yang menyatakan koordinat data.
+
+```{r}
+# Merubah class "data frame" menjadi "Spatial Point Data Frame (SPDF)" 
+coordinates(data) = ~X+Y
+```
+
+Selanjutnya dihitung nilai variogram eksperimental kemudian plot secara otomatis. Variogram eksperimental adalah variogram yang diperoleh dari datayang diamati atau data hasil pengukuran. Plot variogram untuk menentukan nilai parameter-parameter variogram yang kemudian dijadikan nilai taksiran awal dalam pencocokan variogram eksperimental dengan model teoritis.
+```{r}
+# Mengitung Variogram eksperimental kemudian plot secara otomatis
+(vgm1 <- variogram(DBD ~ 1, data))
+plot(vgm1, cex = 1)
+```
+
+Memodifikasi interval jarak dengan memodifikasidengantransformasi (misalkandenganlogaritmanatural dan menambahkan width pada fungsi variogram untuk memperlebar interval kelas agar pasangan data di setiap kelas jarak ℎ lebih banyak.
+
+```{r}
+(vgm2 <- variogram(DBD ~ 1, data, width = 0.01))
+plot(vgm2, cex = 1)
+```
+
+## Model Variogram
+Menampilkan model variogram terbaik antara Eksponensial, Sperikal, dan Gaussian.
+
+```{r}
+# Menampilkan model variogram eksperimental terbaik diantara model (Exp", "Sph", "Gau")
+# Fitting variogram
+(fit <- fit.variogram(vgm2, model = vgm(model = c("Exp", "Sph", "Gau"))))
+plot(vgm2,fit)
+```
+
+Jadi diperoleh model semi variogram untuk data sumur Jatibarang adalah Model Exponensial.
+##Krigging
+Kriging adalah metode geostatistik yang digunakan untuk mengestimasi nilai dari sebuah titik. Untuk menaksir nilai observasi menggunakan kriging, praktikan memerlukan titik-titik lokasi tak terobservasi. Titik-titik tersebut akan dibuat ke dalam bentuk grid data.
+```{r}
+# Membuat grid untuk melihat peta kontur sebaran data untuk lokasi 
+# tidak terobservasi dengan metode ordinary kriging # n: ukuran grid, 
+# sesuaikan dengan koordinat data
+n <- 0.01
+kolom <- seq(data@bbox[1,1]-n,data@bbox[1,2]+n,by = n)
+baris <- seq(data@bbox[2,1]-n,data@bbox[2,2]+n,by = n)
+the.grid <- expand.grid(X = kolom, Y = baris)
+coordinates(the.grid) <- ~X+Y
+gridded(the.grid) <-T
+
+# Plot grid dan titik observasi
+par(mar=c(1,1,1,1))
+plot(the.grid, cex=0.5, col="grey")
+points(data, pch=1, col='red', cex=1)
+```
+
+Setiap “kotak” (pixel) pada grid (sebelumnya) ditaksir nilainya dengan metode Ordinary Kriging.Kemudian seluruh taksiran tersebut dapat diplot dan menghasilkan peta kontur yang menunjukan taksiran nilai-nilai observasi pada setiap titik di wilayah tersebut.
+```{r}
+# Melakukan penaksiran untuk membentuk peta kontur dengan ordinary kriging
+kriging <- krige(DBD~1,data, the.grid, model=fit)
+
+# Plot kontur sebagai hasil taksiran oleh kriging
+titik <- SpatialPoints(data@coords)
+LayoutPoints <- list('sp.points', titik, pch = 19, cex =  0.8, col = 'red')
+
+# Sesuaikan kolom data yang digunakan pada DataSumurJTB[[n]]
+LayoutLabels <- list('sp.pointLabel', titik, label = as.character(data[[1]]), cex = 0.5, col = 'white')
+spplot(kriging["var1.pred"], main = "Kontur dan Data", sp.layout=list(LayoutPoints,LayoutLabels))
+```
+
+## Kesimpulan
+Prediksi jumlah penderita Demam Berdarah Dengue pada minggu ke 53 diperoleh pada peta kontur yang menunjukkan nilai estimasi pengamatan pada setiap titik di wilayah tersebut. Sehingga dapat digunakan untuk memperkirakan jumlah penderita Demam Berdarah Dengue pada unobservable point di Provinsi DKI Jakarta. Terlihat bahwa selama prediksi satu minggu ke depan jumlah penderita DBD tertinggi berada di wilayah utara DKI Jakarta dan terendah di wilayah timur tengah.
